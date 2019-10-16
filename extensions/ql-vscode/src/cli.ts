@@ -6,8 +6,9 @@ import * as util from 'util';
 import { Logger, ProgressReporter } from "./logging";
 import { Disposable } from "vscode";
 import { DistributionProvider } from "./distribution";
-import { SortDirection, QueryMetadata } from "./interface-types";
 import { assertNever } from "./helpers-pure";
+import { SortDirection } from "./interface-types";
+import { BQRSInfo, DecodedBqrsChunk } from "./bqrs-cli-types";
 
 /**
  * The version of the SARIF format that we are using.
@@ -314,6 +315,36 @@ export class CodeQLCliServer implements Disposable {
       args.push('--ram', queryMemoryMb.toString());
     }
     return await this.runJsonCodeQlCliCommand<string[]>(['resolve', 'ram'], args, "Resolving RAM settings", progressReporter);
+  }
+  /**
+   * Gets the headers (and optionally pagination info) of a bqrs.
+   * @param config The configuration containing the path to the CLI.
+   * @param bqrsPath The path to the vqrs.
+   */
+  async bqrsInfo(bqrsPath: string, pageSize?: number): Promise<BQRSInfo> {
+    const subcommandArgs = (
+      pageSize ? ["--paginate-rows", pageSize.toString()] : []
+    ).concat(
+      bqrsPath
+    );
+    return await this.runJsonCodeQlCliCommand<BQRSInfo>(['bqrs', 'info'], subcommandArgs, "Reading bqrs header");
+  }
+
+  /**
+  * Gets the results from a bqrs.
+  * @param config The configuration containing the path to the CLI.
+  * @param bqrsPath The path to the bqrs.
+  */
+  async bqrsDecode(bqrsPath: string, resultSet: string, pageSize?: number, offset?: number): Promise<DecodedBqrsChunk> {
+    const subcommandArgs = [
+      "--entities=url,string",
+      "--result-set", resultSet,
+    ].concat(
+      pageSize ? ["--rows", pageSize.toString()] : []
+    ).concat(
+      offset ? ["--start-at", offset.toString()] : []
+    ).concat([bqrsPath]);
+    return await this.runJsonCodeQlCliCommand<DecodedBqrsChunk>(['bqrs', 'decode'], subcommandArgs, "Reading bqrs data");
   }
 
 
