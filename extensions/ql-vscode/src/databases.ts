@@ -5,10 +5,10 @@ import * as vscode from 'vscode';
 import * as cli from './cli';
 import { ExtensionContext } from 'vscode';
 import { showAndLogErrorMessage, showAndLogWarningMessage, showAndLogInformationMessage } from './helpers';
-import { zipArchiveScheme, encodeSourceArchiveUri, decodeSourceArchiveUri } from './archive-filesystem-provider';
 import { DisposableObject } from 'semmle-vscode-utils';
 import { QueryServerConfig } from './config';
 import { Logger, logger } from './logging';
+import { sourceArchiveScheme, encodeSourceArchiveUri, decodeSourceArchiveUri } from './archive-filesystem-provider';
 
 /**
  * databases.ts
@@ -117,10 +117,10 @@ async function findSourceArchive(databasePath: string, silent: boolean = false):
     const zipPath = basePath + '.zip';
 
     if (await fs.pathExists(basePath)) {
-      return vscode.Uri.file(basePath);
+      return vscode.Uri.file(basePath).with({ scheme: sourceArchiveScheme });
     }
     else if (await fs.pathExists(zipPath)) {
-      return vscode.Uri.file(zipPath).with({ scheme: zipArchiveScheme });
+      return vscode.Uri.file(zipPath).with({ scheme: sourceArchiveScheme });
     }
   }
   if (!silent)
@@ -323,10 +323,10 @@ class DatabaseItemImpl implements DatabaseItem {
         const absoluteFilePath = file.replace(':', '_');
         // Strip any leading slashes from the file path, and replace `:` with `_`.
         const relativeFilePath = absoluteFilePath.replace(/^\/*/, '').replace(':', '_');
-        if (sourceArchive.scheme == zipArchiveScheme) {
+        if (sourceArchive.scheme == sourceArchiveScheme) {
           return encodeSourceArchiveUri({
             pathWithinSourceArchive: absoluteFilePath,
-            sourceArchiveZipPath: sourceArchive.fsPath,
+            sourceArchiveRootPath: sourceArchive.fsPath,
           });
         }
         else {
@@ -394,7 +394,7 @@ class DatabaseItemImpl implements DatabaseItem {
       return undefined;
     return encodeSourceArchiveUri({
       pathWithinSourceArchive: '/',
-      sourceArchiveZipPath: sourceArchive.fsPath,
+      sourceArchiveRootPath: sourceArchive.fsPath,
     });
   }
 
@@ -404,8 +404,8 @@ class DatabaseItemImpl implements DatabaseItem {
   public belongsToSourceArchiveExplorerUri(uri: vscode.Uri): boolean {
     if (this.sourceArchive === undefined)
       return false;
-    return uri.scheme === zipArchiveScheme &&
-      decodeSourceArchiveUri(uri).sourceArchiveZipPath === this.sourceArchive.fsPath;
+    return uri.scheme === sourceArchiveScheme &&
+      decodeSourceArchiveUri(uri).sourceArchiveRootPath === this.sourceArchive.fsPath;
   }
 }
 
