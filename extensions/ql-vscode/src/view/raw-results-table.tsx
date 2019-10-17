@@ -1,6 +1,6 @@
 import * as React from "react";
 import { UrlValue, ColumnKind, ColumnValue, EntityValue, PAGE_SIZE, Column } from "../bqrs-cli-types";
-import { getPage } from "./parserApi";
+import { getPage } from "./parser-api";
 import { RawResults, SortState, SortDirection,  ResultPageSpecifier, sameResultPageSpecifier } from "../interface-types";
 import { renderLocation, className, zebraStripe } from "./result-table-utils";
 import { ResolvableLocationValue, LocationStyle } from "../locations";

@@ -78,7 +78,7 @@ export class QueryInfo {
     const queryToRun: messages.QueryToRun = {
       resultsPath: this.resultsPaths.resultsPath,
       qlo: vscode.Uri.file(this.compiledQueryPath).toString(),
-      allowUnknownTemplates: true,
+      allowUnknownTemplates: false,
       templateValues: this.templates,
       id: callbackId,
       timeoutSecs: qs.config.timeoutSecs,

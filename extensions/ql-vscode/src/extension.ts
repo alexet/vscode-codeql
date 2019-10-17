@@ -1,11 +1,13 @@
-import { commands, Disposable, ExtensionContext, extensions, ProgressLocation, ProgressOptions, window as Window, Uri } from 'vscode';
+import { commands, Disposable, ExtensionContext, extensions, ProgressLocation, ProgressOptions, window as Window, Uri, languages } from 'vscode';
 import { ErrorCodes, LanguageClient, ResponseError } from 'vscode-languageclient';
 import * as archiveFilesystemProvider from './archive-filesystem-provider';
 import { DistributionConfigListener, QueryServerConfigListener, QueryHistoryConfigListener } from './config';
 import { DatabaseManager } from './databases';
 import { DatabaseUI } from './databases-ui';
-import { DistributionUpdateCheckResultKind, DistributionManager, FindDistributionResult, FindDistributionResultKind, GithubApiError,
-  DEFAULT_DISTRIBUTION_VERSION_CONSTRAINT, GithubRateLimitedError } from './distribution';
+import {
+  DistributionUpdateCheckResultKind, DistributionManager, FindDistributionResult, FindDistributionResultKind, GithubApiError,
+  DEFAULT_DISTRIBUTION_VERSION_CONSTRAINT, GithubRateLimitedError
+} from './distribution';
 import * as helpers from './helpers';
 import { spawnIdeServer } from './ide-server';
 import { InterfaceManager, WebviewReveal } from './interface';
@@ -16,6 +18,7 @@ import { CodeQLCliServer } from './cli';
 import { assertNever } from './helpers-pure';
 import * as qsClient from './queryserver-client';
 import { CompletedQuery, getResultsHeader } from './query-results';
+import { createDefinitionsHandler, createReferencesHander } from './definitions';
 
 /**
  * extension.ts
@@ -304,6 +307,16 @@ async function activateWithInstalledDistribution(ctx: ExtensionContext, distribu
   ctx.subscriptions.push(commands.registerCommand('codeQL.quickEval', async (uri: Uri | undefined) => await compileAndRunQuery(true, uri)));
 
   ctx.subscriptions.push(client.start());
+
+  languages.registerDefinitionProvider({
+    scheme: archiveFilesystemProvider.sourceArchiveScheme
+  },
+    createDefinitionsHandler(cliServer, qs, dbm));
+  languages.registerReferenceProvider({
+    scheme: archiveFilesystemProvider.sourceArchiveScheme
+  },
+    createReferencesHander(cliServer, qs, dbm));
+
 }
 
 const checkForUpdatesCommand = 'codeQL.checkForUpdatesToCLI';
