@@ -19,6 +19,7 @@
     "Programming Languages"
   ],
   "activationEvents": [
+    "onFileSystem:ql-src-archive",
     "onLanguage:ql",
     "onView:codeQLDatabases",
     "onView:codeQLQueryHistory",
