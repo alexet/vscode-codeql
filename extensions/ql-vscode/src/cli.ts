@@ -7,7 +7,7 @@ import { Logger, ProgressReporter } from "./logging";
 import { Disposable } from "vscode";
 import { DistributionProvider } from "./distribution";
 import { assertNever } from "./helpers-pure";
-import { SortDirection } from "./interface-types";
+import { SortDirection, QueryMetadata } from "./interface-types";
 import { BQRSInfo, DecodedBqrsChunk } from "./bqrs-cli-types";
 
 /**

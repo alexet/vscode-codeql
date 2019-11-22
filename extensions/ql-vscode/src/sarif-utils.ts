@@ -1,6 +1,5 @@
 import * as Sarif from "sarif"
-import * as path from "path"
-import { LocationStyle, ResolvableLocationValue } from "semmle-bqrs";
+import { LocationStyle,  ResolvableLocationValue } from "./locations";
 
 export interface SarifLink {
   dest: number
@@ -57,9 +56,8 @@ export function parseSarifPlainTextMessage(message: string): SarifMessageCompone
  * @returns A string that is valid for the `.file` field of a `FivePartLocation`:
  * directory separators are normalized, but drive letters `C:` may appear.
  */
-export function getPathRelativeToSourceLocationPrefix(sourceLocationPrefix: string, sarifRelativeUui: string) {
-  const normalizedSourceLocationPrefix = sourceLocationPrefix.replace(/\\/g, '/');
-  return path.join(normalizedSourceLocationPrefix, decodeURIComponent(sarifRelativeUui));
+export function getPathRelativeToSourceLocationPrefix(sourceLocationPrefixUri: string, sarifRelativeUri: string) {
+  return sourceLocationPrefixUri + "/"+ sarifRelativeUri;
 }
 
 export function parseSarifLocation(loc: Sarif.Location, sourceLocationPrefix: string): ParsedSarifLocation {
@@ -76,12 +74,11 @@ export function parseSarifLocation(loc: Sarif.Location, sourceLocationPrefix: st
   const uri = physicalLocation.artifactLocation.uri;
 
   const fileUriRegex = /^file:/;
-  const effectiveLocation = uri.match(fileUriRegex) ?
-    decodeURIComponent(uri.replace(fileUriRegex, '')) :
-    getPathRelativeToSourceLocationPrefix(sourceLocationPrefix, uri);
+  const effectiveUri = uri.match(fileUriRegex) ?
+    uri : getPathRelativeToSourceLocationPrefix(sourceLocationPrefix, uri);
   const userVisibleFile = uri.match(fileUriRegex) ?
     decodeURIComponent(uri.replace(fileUriRegex, '')) :
-    uri;
+    decodeURIComponent(uri);
 
   if (physicalLocation.region === undefined) {
     // If the region property is absent, the physicalLocation object refers to the entire file.
@@ -89,7 +86,7 @@ export function parseSarifLocation(loc: Sarif.Location, sourceLocationPrefix: st
     // TODO: Do we get here if we provide a non-filesystem URL?
     return {
       t: LocationStyle.WholeFile,
-      file: effectiveLocation,
+      uri: effectiveUri,
       userVisibleFile,
     };
   } else {
@@ -113,7 +110,7 @@ export function parseSarifLocation(loc: Sarif.Location, sourceLocationPrefix: st
 
     return {
       t: LocationStyle.FivePart,
-      file: effectiveLocation,
+      uri: effectiveUri,
       userVisibleFile,
       lineStart,
       colStart,

@@ -3,6 +3,7 @@ import { ExtensionContext, window as Window } from 'vscode';
 import { QueryHistoryConfig } from './config';
 import { CompletedQuery } from './query-results';
 import { QueryWithResults } from './run-queries';
+import { BQRSInfo } from './bqrs-cli-types';
 /**
  * query-history.ts
  * ------------
@@ -16,6 +17,7 @@ import { QueryWithResults } from './run-queries';
  * Tree data provider for the query history view.
  */
 class HistoryTreeDataProvider implements vscode.TreeDataProvider<CompletedQuery> {
+
 
   /**
    * XXX: This idiom for how to get a `.fire()`-able event emitter was
@@ -94,6 +96,10 @@ class HistoryTreeDataProvider implements vscode.TreeDataProvider<CompletedQuery>
   refresh() {
     this._onDidChangeTreeData.fire();
   }
+  
+  getItem(runId: number): CompletedQuery | undefined {
+    return this.history.filter(q => q.query.queryID == runId).pop();
+  }
 }
 
 /**
@@ -103,6 +109,7 @@ class HistoryTreeDataProvider implements vscode.TreeDataProvider<CompletedQuery>
 const DOUBLE_CLICK_TIME = 500;
 
 export class QueryHistoryManager {
+
   treeDataProvider: HistoryTreeDataProvider;
   ctx: ExtensionContext;
   treeView: vscode.TreeView<CompletedQuery>;
@@ -194,10 +201,14 @@ export class QueryHistoryManager {
     });
   }
 
-  addQuery(info: QueryWithResults): CompletedQuery {
-    const item = new CompletedQuery(info, this.queryHistoryConfigListener);
+  addQuery(results: QueryWithResults, header: BQRSInfo | undefined): CompletedQuery {
+    const item = new CompletedQuery(results, this.queryHistoryConfigListener, header);
     this.treeDataProvider.push(item);
     this.treeView.reveal(item, { select: true });
     return item;
+  }
+  
+  getItem(runId: number) : CompletedQuery| undefined {
+    return this.treeDataProvider.getItem(runId)
   }
 }

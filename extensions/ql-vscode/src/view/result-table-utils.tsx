@@ -1,15 +1,6 @@
 import * as React from 'react';
-import { LocationValue, ResolvableLocationValue, tryGetResolvableLocation } from 'semmle-bqrs';
-import { SortState, QueryMetadata } from '../interface-types';
-import { ResultSet, vscode } from './results';
-
-export interface ResultTableProps {
-  resultSet: ResultSet;
-  databaseUri: string;
-  metadata?: QueryMetadata
-  resultsPath: string | undefined;
-  sortState?: SortState;
-}
+import { vscode } from './results';
+import { ResolvableLocationValue, LocationValue, tryGetResolvableLocation } from '../locations';
 
 export const className = 'vscode-codeql__result-table';
 export const tableSelectionHeaderClassName = 'vscode-codeql__table-selection-header';
@@ -21,22 +12,22 @@ export const selectedRowClassName = 'vscode-codeql__result-table-row--selected';
 
 export function jumpToLocationHandler(
   loc: ResolvableLocationValue,
-  databaseUri: string,
+  runId: number,
   callback?: () => void
 ): (e: React.MouseEvent) => void {
   return (e) => {
-    jumpToLocation(loc, databaseUri);
+    jumpToLocation(loc, runId);
     e.preventDefault();
     e.stopPropagation();
     if (callback) callback();
   };
 }
 
-export function jumpToLocation(loc: ResolvableLocationValue, databaseUri: string) {
+export function jumpToLocation(loc: ResolvableLocationValue, runId: number) {
   vscode.postMessage({
     t: 'viewSourceFile',
     loc,
-    databaseUri
+    runId
   });
 }
 
@@ -44,7 +35,7 @@ export function jumpToLocation(loc: ResolvableLocationValue, databaseUri: string
  * Render a location as a link which when clicked displays the original location.
  */
 export function renderLocation(loc: LocationValue | undefined, label: string | undefined,
-  databaseUri: string, title?: string, callback?: () => void): JSX.Element {
+  runId: number, title?: string, callback?: () => void): JSX.Element {
 
   // If the label was empty, use a placeholder instead, so the link is still clickable.
   let displayLabel = label;
@@ -59,12 +50,10 @@ export function renderLocation(loc: LocationValue | undefined, label: string | u
       return <a href="#"
         className="vscode-codeql__result-table-location-link"
         title={title}
-        onClick={jumpToLocationHandler(resolvableLoc, databaseUri, callback)}>{displayLabel}</a>;
-    } else {
-      return <span title={title}>{displayLabel}</span>;
+        onClick={jumpToLocationHandler(resolvableLoc, runId, callback)}>{displayLabel}</a>;
     }
   }
-  return <span />
+  return<span title={title}>{displayLabel}</span>;
 }
 
 /**
@@ -80,6 +69,6 @@ export function zebraStripe(index: number, ...otherClasses: string[]): { classNa
  */
 export function selectableZebraStripe(isSelected: boolean, index: number, ...otherClasses: string[]): { className: string } {
   return isSelected
-      ? { className: [selectedRowClassName, ...otherClasses].join(' ') }
-      : zebraStripe(index, ...otherClasses)
+    ? { className: [selectedRowClassName, ...otherClasses].join(' ') }
+    : zebraStripe(index, ...otherClasses)
 }

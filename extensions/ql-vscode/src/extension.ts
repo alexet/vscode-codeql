@@ -15,7 +15,7 @@ import { QueryHistoryManager } from './query-history';
 import { CodeQLCliServer } from './cli';
 import { assertNever } from './helpers-pure';
 import * as qsClient from './queryserver-client';
-import { CompletedQuery } from './query-results';
+import { CompletedQuery, getResultsHeader } from './query-results';
 
 /**
  * extension.ts
@@ -251,12 +251,12 @@ async function activateWithInstalledDistribution(ctx: ExtensionContext, distribu
     queryHistoryConfigurationListener,
     async item => showResultsForCompletedQuery(item, WebviewReveal.Forced)
   );
-  const intm = new InterfaceManager(ctx, dbm, cliServer, queryServerLogger);
+  const intm = new InterfaceManager(ctx, dbm, qhm, cliServer, queryServerLogger);
   ctx.subscriptions.push(intm);
   archiveFilesystemProvider.activate(ctx);
 
   async function showResultsForCompletedQuery(query: CompletedQuery, forceReveal: WebviewReveal): Promise<void> {
-    await intm.showResults(query, forceReveal, false);
+    await intm.showResults(query, forceReveal);
   }
 
   async function compileAndRunQuery(quickEval: boolean, selectedQuery: Uri | undefined) {
@@ -266,8 +266,9 @@ async function activateWithInstalledDistribution(ctx: ExtensionContext, distribu
         if (dbItem === undefined) {
           throw new Error('Can\'t run query without a selected database');
         }
-        const info = await compileAndRunQueryAgainstDatabase(cliServer, qs, dbItem, quickEval, selectedQuery);
-        const item = qhm.addQuery(info);
+        const results = await compileAndRunQueryAgainstDatabase(cliServer, qs, dbItem, quickEval, selectedQuery);
+        const header = await getResultsHeader(cliServer, results)
+        const item = qhm.addQuery(results, header);
         await showResultsForCompletedQuery(item, WebviewReveal.NotForced);
       }
       catch (e) {

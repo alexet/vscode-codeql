@@ -2,16 +2,16 @@ import * as crypto from 'crypto';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as tmp from 'tmp';
+import { promisify } from 'util';
 import * as vscode from 'vscode';
 import * as cli from './cli';
 import { DatabaseItem, getUpgradesDirectories } from './databases';
 import * as helpers from './helpers';
-import { DatabaseInfo, QueryMetadata, ResultsPaths } from './interface-types';
-import { logger } from './logging';
 import * as messages from './messages';
 import * as qsClient from './queryserver-client';
-import { promisify } from 'util';
 import { upgradeDatabase } from './upgrades';
+import { logger } from './logging';
+import { QueryMetadata, ResultsPaths } from './interface-types';
 
 /**
  * queries.ts
@@ -59,6 +59,7 @@ export class QueryInfo {
     this.resultsPaths = {
       resultsPath: path.join(tmpDir.name, `results${this.queryID}.bqrs`),
       interpretedResultsPath: path.join(tmpDir.name, `interpretedResults${this.queryID}.sarif`)
+      ,sortedResultsPath: path.join(tmpDir.name, `results${this.queryID}.sorted.bqrs`)
     };
     if (dbItem.contents === undefined) {
       throw new Error('Can\'t run query on invalid database.');
@@ -158,7 +159,6 @@ export class QueryInfo {
 export interface QueryWithResults {
   readonly query: QueryInfo;
   readonly result: messages.EvaluationResult;
-  readonly database: DatabaseInfo;
 }
 
 export async function clearCacheInDatabase(qs: qsClient.QueryServerClient, dbItem: DatabaseItem):
@@ -411,10 +411,6 @@ export async function compileAndRunQueryAgainstDatabase(
     return {
       query,
       result,
-      database: {
-        name: db.name,
-        databaseUri: db.databaseUri.toString(true)
-      }
     };
   } else {
     // Error dialogs are limited in size and scrollability,
@@ -448,10 +444,6 @@ export async function compileAndRunQueryAgainstDatabase(
         runId: -1,
         message: "Query had compilation errors"
       },
-      database: {
-        name: db.name,
-        databaseUri: db.databaseUri.toString(true)
-      }
     };
   }
 }

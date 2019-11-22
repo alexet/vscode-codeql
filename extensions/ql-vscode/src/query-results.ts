@@ -1,39 +1,42 @@
-import { QueryWithResults, tmpDir, QueryInfo } from "./run-queries";
+import {  QueryWithResults, QueryInfo } from "./run-queries";
 import * as messages from './messages';
 import * as helpers from './helpers';
 import * as cli from './cli';
 import * as sarif from 'sarif';
 import * as fs from 'fs-extra';
-import * as path from 'path';
-import { SortState, SortedResultSetInfo, DatabaseInfo, QueryMetadata } from "./interface-types";
+import { SortState, QueryMetadata, sameSortState, ResultsPaths } from "./interface-types";
 import { QueryHistoryConfig } from "./config";
+import { BQRSInfo, DecodedBqrsChunk, PAGE_SIZE, ResultSetSchema } from "./bqrs-cli-types";
 
-export class CompletedQuery implements QueryWithResults {
-  readonly time: string;
+
+interface SortedResult {
+  sortState: SortState;
+  sortedSet: string;
+  sortedHeader: BQRSInfo;
+}
+
+export class CompletedQuery implements QueryWithResults{
   readonly query: QueryInfo;
   readonly result: messages.EvaluationResult;
-  readonly database: DatabaseInfo;
+  readonly time: string;
+  public label?: string;
 
-  /**
-   * Map from result set name to SortedResultSetInfo.
-   */
-  sortedResultsInfo: Map<string, SortedResultSetInfo>;
-
+  private sortedResult?: SortedResult;
+  private sortInProgress = false;
+  private sortQueue: (() => void)[] = [];
 
   constructor(
     evalaution: QueryWithResults,
     public config: QueryHistoryConfig,
-    public label?: string, // user-settable label
+    public header: BQRSInfo | undefined
   ) {
     this.query = evalaution.query;
     this.result = evalaution.result;
-    this.database = evalaution.database;
     this.time = new Date().toLocaleString();
-    this.sortedResultsInfo = new Map();
   }
 
   get databaseName(): string {
-    return this.database.name;
+    return this.query.dbItem.name;
   }
   get queryName(): string {
     return helpers.getQueryName(this.query);
@@ -84,31 +87,88 @@ export class CompletedQuery implements QueryWithResults {
     return this.config.format;
   }
 
+  private acquireSortLock(): Promise<void> {
+    return new Promise((resolve, _reject) => {
+      if (!this.sortInProgress) {
+        this.sortInProgress = true;
+        resolve();
+      } else {
+        this.sortQueue.push(resolve);
+      }
+    });
+  }
+
+  private releaseSortLock() {
+    const next = this.sortQueue.pop();
+    if (next) {
+      next()
+    } else {
+      this.sortInProgress = false;
+    }
+  }
+
+  async getResults(server: cli.CodeQLCliServer, resultName: string, pageNumber: number, sortState?: SortState): Promise<DecodedBqrsChunk | undefined> {
+    if (!this.header) {
+      return undefined;
+    }
+    if (sortState) {
+      try {
+        await this.acquireSortLock();
+        const sortedPath  = this.query.resultsPaths.sortedResultsPath;
+        if (!this.sortedResult || resultName !== this.sortedResult.sortedSet || !sameSortState(this.sortedResult.sortState, sortState)) {
+          if (this.sortedResult) {
+            await fs.unlink(sortedPath)
+
+          }
+          await server.sortBqrs(this.query.resultsPaths.resultsPath, sortedPath, resultName, [sortState.columnIndex], [sortState.direction]);
+          const info = await server.bqrsInfo(sortedPath, PAGE_SIZE);
+          this.sortedResult = {
+            sortState,
+            sortedHeader: info,
+            sortedSet: resultName
+          };
+        }
+        const schema = this.sortedResult.sortedHeader["result-sets"][0];
+        return await this.decodeResults(server, sortedPath, resultName, schema, pageNumber);
+      } finally {
+        this.releaseSortLock();
+      }
+    } else {
+      const schema = this.header["result-sets"].filter(rs => rs.name === resultName).pop();
+      return await this.decodeResults(server, this.query.resultsPaths.resultsPath, resultName, schema, pageNumber);
+    }
+  }
+
+
+  private async decodeResults(server: cli.CodeQLCliServer, resultPath: string,resultName: string, schema : ResultSetSchema | undefined, pageNumber: number): Promise<DecodedBqrsChunk | undefined> {
+      if (!schema || ! schema.pagination) {
+        return undefined;
+      }
+      if (!(pageNumber in schema.pagination.offsets)) {
+        return undefined;
+      }
+      const offset = schema.pagination.offsets[pageNumber];
+      return await server.bqrsDecode(resultPath, resultName, PAGE_SIZE, offset);
+  }
+
   toString(): string {
     return this.interpolate(this.getLabel());
   }
-  async updateSortState(server: cli.CodeQLCliServer, resultSetName: string, sortState: SortState | undefined): Promise<void> {
-    if (sortState === undefined) {
-      this.sortedResultsInfo.delete(resultSetName);
-      return;
-    }
-
-    const sortedResultSetInfo: SortedResultSetInfo = {
-      resultsPath: path.join(tmpDir.name, `sortedResults${this.query.queryID}-${resultSetName}.bqrs`),
-      sortState
-    };
-
-    await server.sortBqrs(this.query.resultsPaths.resultsPath, sortedResultSetInfo.resultsPath, resultSetName, [sortState.columnIndex], [sortState.direction]);
-    this.sortedResultsInfo.set(resultSetName, sortedResultSetInfo);
-  }
-
 }
+
+export async function getResultsHeader(server: cli.CodeQLCliServer, info: QueryWithResults): Promise<BQRSInfo | undefined> {
+  if (info.result.resultType != messages.QueryResultType.SUCCESS) {
+    return undefined;
+  }
+  return await server.bqrsInfo(info.query.resultsPaths.resultsPath, PAGE_SIZE);
+}
+
 
 /**
  * Call cli command to interpret results.
  */
-export async function interpretResults(server: cli.CodeQLCliServer, metadata: QueryMetadata | undefined, resultsPath: string, sourceInfo?: cli.SourceInfo): Promise<sarif.Log> {
-  const interpretedResultsPath = resultsPath + ".interpreted.sarif"
+export async function interpretResults(server: cli.CodeQLCliServer, metadata: QueryMetadata | undefined, resultsPaths: ResultsPaths, sourceInfo?: cli.SourceInfo): Promise<sarif.Log> {
+  const interpretedResultsPath = resultsPaths.interpretedResultsPath;
 
   if (await fs.pathExists(interpretedResultsPath)) {
     return JSON.parse(await fs.readFile(interpretedResultsPath, 'utf8'));
@@ -125,5 +185,5 @@ export async function interpretResults(server: cli.CodeQLCliServer, metadata: Qu
     // SARIF format does, so in the absence of one, we use a dummy id.
     id = "dummy-id";
   }
-  return await server.interpretBqrs({ kind, id }, resultsPath, interpretedResultsPath, sourceInfo);
+  return await server.interpretBqrs({ kind, id }, resultsPaths.resultsPath, interpretedResultsPath, sourceInfo);
 }

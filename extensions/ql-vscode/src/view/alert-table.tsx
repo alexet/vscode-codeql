@@ -2,13 +2,18 @@ import * as path from 'path';
 import * as React from 'react';
 import * as Sarif from 'sarif';
 import * as Keys from '../result-keys';
-import { LocationStyle } from 'semmle-bqrs';
+import { LocationStyle } from '../locations';
 import * as octicons from './octicons';
-import { className, renderLocation, ResultTableProps, zebraStripe, selectableZebraStripe, jumpToLocation } from './result-table-utils';
-import { PathTableResultSet, onNavigation, NavigationEvent } from './results';
+import { className, renderLocation, zebraStripe, selectableZebraStripe, jumpToLocation } from './result-table-utils';
+import {  onNavigation, NavigationEvent, } from './results';
 import { parseSarifPlainTextMessage, parseSarifLocation } from '../sarif-utils';
 
-export type PathTableProps = ResultTableProps & { resultSet: PathTableResultSet };
+export interface PathTableProps {
+  sarif : Sarif.Log;
+  runId: number;
+  sourceLocationPrefixUri: string
+  numTruncatedResults: number
+}
 export interface PathTableState {
   expanded: { [k: string]: boolean };
   selectedPathNode: undefined | Keys.PathNode;
@@ -44,10 +49,9 @@ export class PathTable extends React.Component<PathTableProps, PathTableState> {
   }
 
   render(): JSX.Element {
-    const { databaseUri, resultSet } = this.props;
+    const { sarif, runId, sourceLocationPrefixUri, numTruncatedResults } = this.props;
 
     const rows: JSX.Element[] = [];
-    const { numTruncatedResults, sourceLocationPrefix } = resultSet;
 
     function renderRelatedLocations(msg: string, relatedLocations: Sarif.Location[]): JSX.Element[] {
       const relatedLocationsById: { [k: string]: Sarif.Location } = {};
@@ -87,13 +91,14 @@ export class PathTable extends React.Component<PathTableProps, PathTableState> {
     };
 
     function renderSarifLocationWithText(text: string | undefined, loc: Sarif.Location, pathNodeKey: Keys.PathNode | undefined): JSX.Element | undefined {
-      const parsedLoc = parseSarifLocation(loc, sourceLocationPrefix);
+      const parsedLoc = parseSarifLocation(loc, sourceLocationPrefixUri);
+
       switch (parsedLoc.t) {
         case 'NoLocation':
           return renderNonLocation(text, parsedLoc.hint);
         case LocationStyle.FivePart:
         case LocationStyle.WholeFile:
-            return renderLocation(parsedLoc, text, databaseUri, undefined, updateSelectionCallback(pathNodeKey));
+            return renderLocation(parsedLoc, text, runId, undefined, updateSelectionCallback(pathNodeKey));
       }
       return undefined;
     }
@@ -103,7 +108,7 @@ export class PathTable extends React.Component<PathTableProps, PathTableState> {
      * human-readable form of the location itself.
      */
     function renderSarifLocation(loc: Sarif.Location, pathNodeKey: Keys.PathNode | undefined): JSX.Element | undefined {
-      const parsedLoc = parseSarifLocation(loc, sourceLocationPrefix);
+      const parsedLoc = parseSarifLocation(loc, sourceLocationPrefixUri);
       let shortLocation, longLocation: string;
       switch (parsedLoc.t) {
         case 'NoLocation':
@@ -111,11 +116,11 @@ export class PathTable extends React.Component<PathTableProps, PathTableState> {
         case LocationStyle.WholeFile:
           shortLocation = `${path.basename(parsedLoc.userVisibleFile)}`;
           longLocation = `${parsedLoc.userVisibleFile}`;
-          return renderLocation(parsedLoc, shortLocation, databaseUri, longLocation, updateSelectionCallback(pathNodeKey));
+          return renderLocation(parsedLoc, shortLocation, runId, longLocation);
         case LocationStyle.FivePart:
           shortLocation = `${path.basename(parsedLoc.userVisibleFile)}:${parsedLoc.lineStart}:${parsedLoc.colStart}`;
           longLocation = `${parsedLoc.userVisibleFile}`;
-          return renderLocation(parsedLoc, shortLocation, databaseUri, longLocation, updateSelectionCallback(pathNodeKey));
+          return renderLocation(parsedLoc, shortLocation, runId, longLocation, updateSelectionCallback(pathNodeKey));
       }
     }
 
@@ -127,10 +132,10 @@ export class PathTable extends React.Component<PathTableProps, PathTableState> {
 
     let expansionIndex = 0;
 
-    if (resultSet.sarif.runs.length === 0) return noResults;
-    if (resultSet.sarif.runs[0].results === undefined) return noResults;
+    if (sarif.runs.length === 0) return noResults;
+    if (sarif.runs[0].results === undefined) return noResults;
 
-    resultSet.sarif.runs[0].results.forEach((result, resultIndex) => {
+    sarif.runs[0].results.forEach((result, resultIndex) => {
       const text = result.message.text || '[no text]';
       const msg: JSX.Element[] =
         result.relatedLocations === undefined ?
@@ -240,7 +245,7 @@ export class PathTable extends React.Component<PathTableProps, PathTableState> {
       let { selectedPathNode } = prevState;
       if (selectedPathNode === undefined) return prevState;
 
-      let path = Keys.getPath(this.props.resultSet.sarif, selectedPathNode);
+      let path = Keys.getPath(this.props.sarif, selectedPathNode);
       if (path === undefined) return prevState;
 
       let nextIndex = selectedPathNode.pathNodeIndex + event.direction;
@@ -249,10 +254,10 @@ export class PathTable extends React.Component<PathTableProps, PathTableState> {
       let sarifLoc = path.locations[nextIndex].location;
       if (sarifLoc === undefined) return prevState;
 
-      let loc = parseSarifLocation(sarifLoc, this.props.resultSet.sourceLocationPrefix);
+      let loc = parseSarifLocation(sarifLoc, this.props.sourceLocationPrefixUri);
       if (loc.t === 'NoLocation') return prevState;
 
-      jumpToLocation(loc, this.props.databaseUri);
+      jumpToLocation(loc, this.props.runId);
       let newSelection = { ...selectedPathNode, pathNodeIndex: nextIndex };
       return { ...prevState, selectedPathNode: newSelection };
     });

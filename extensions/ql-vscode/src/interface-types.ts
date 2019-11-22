@@ -1,20 +1,11 @@
 import * as sarif from 'sarif';
-import { ResolvableLocationValue } from 'semmle-bqrs';
+import { ResolvableLocationValue } from './locations';
+import { Column, DecodedBqrsChunk } from './bqrs-cli-types';
 
 /**
  * Only ever show this many results per run in interpreted results.
  */
 export const INTERPRETED_RESULTS_PER_RUN_LIMIT = 100;
-
-/**
- * Only ever show this many rows in a raw result table.
- */
-export const RAW_RESULTS_LIMIT = 10000;
-
-export interface DatabaseInfo {
-  name: string;
-  databaseUri: string;
-}
 
 /** Arbitrary query metadata */
 export interface QueryMetadata {	
@@ -23,31 +14,37 @@ export interface QueryMetadata {
   id?: string,	
   kind?: string	
 }
-
-export interface PreviousExecution {
-  queryName: string;
-  time: string;
-  databaseName: string;
-  durationSeconds: number;
-}
-
-export interface Interpretation {
-  sourceLocationPrefix: string;
-  numTruncatedResults: number;
-  sarif: sarif.Log;
+export interface ResultsInfo {
+  runId: number;
+  resultsInfo: Results[];
 }
 
 export interface ResultsPaths {
   resultsPath: string;
   interpretedResultsPath: string;
+  sortedResultsPath: string;
+}	
+
+export type Results = (RawResults | AlertResults)
+
+export interface RawResults {
+  t: "raw"
+  name: string,
+  rows: number,
+  columns: Column[],
 }
 
-export interface SortedResultSetInfo {
-  resultsPath: string;
-  sortState: SortState;
+export interface AlertResults {
+  t: "alerts"
+  name: string,
+  interpretation: Interpretation
 }
 
-export type SortedResultsMap = { [resultSet: string]: SortedResultSetInfo };
+export interface Interpretation {
+  sourceLocationPrefixUri: string;
+  numTruncatedResults: number;
+  sarif: sarif.Log;
+}
 
 /**
  * A message to indicate that the results are being updated.
@@ -58,20 +55,15 @@ export interface ResultsUpdatingMsg {
   t: 'resultsUpdating';
 }
 
-export interface SetStateMsg {
-  t: 'setState';
-  resultsPath: string;
-  origResultsPaths: ResultsPaths;
-  sortedResultsMap: SortedResultsMap;
-  interpretation: undefined | Interpretation;
-  database: DatabaseInfo;
-  metadata?: QueryMetadata
-  /**
-   * Whether to keep displaying the old results while rendering the new results.
-   *
-   * This is useful to prevent properties like scroll state being lost when rendering the sorted results after sorting a column.
-   */
-  shouldKeepOldResultsWhileRendering: boolean;
+export interface SetQueryMsg {
+  t: 'setQuery';
+  results: ResultsInfo;
+};
+
+export interface SetValues {
+  t: 'setResult';
+  resultPage: ResultPageSpecifier
+  results: DecodedBqrsChunk;
 };
 
 /** Advance to the next or previous path no in the path viewer */
@@ -82,40 +74,64 @@ export interface NavigatePathMsg {
   direction: number;
 }
 
-export type IntoResultsViewMsg = ResultsUpdatingMsg | SetStateMsg | NavigatePathMsg;
+export type IntoResultsViewMsg = ResultsUpdatingMsg
+  | SetQueryMsg
+  | NavigatePathMsg
+  | SetValues;
 
-export type FromResultsViewMsg = ViewSourceFileMsg | ToggleDiagnostics | ChangeSortMsg | ResultViewLoaded;
+export type FromResultsViewMsg = ViewSourceFileMsg
+  | ToggleDiagnostics
+  | ResultViewLoaded
+  | GetPageData;
 
-interface ViewSourceFileMsg {
+
+
+export interface ViewSourceFileMsg {
   t: 'viewSourceFile';
   loc: ResolvableLocationValue;
-  databaseUri: string;
+  runId: number;
 };
 
-interface ToggleDiagnostics {
+export interface ToggleDiagnostics {
   t: 'toggleDiagnostics';
-  databaseUri: string;
-  metadata?: QueryMetadata
-  origResultsPaths: ResultsPaths;
+  runId: number;
   visible: boolean;
-  kind?: string;
 };
 
-interface ResultViewLoaded {
+export interface ResultViewLoaded {
   t: 'resultViewLoaded';
 };
+export interface GetPageData {
+  t: 'getPageData';
+  resultPage: ResultPageSpecifier
+};
+
 
 export enum SortDirection {
   asc, desc
 }
 
-export interface SortState {
-  columnIndex: number;
-  direction: SortDirection;
+
+export interface ResultPageSpecifier {
+  runId: number;
+  page: number;
+  resultSetName: string
+  sortState: SortState | null;
 }
 
-interface ChangeSortMsg {
-  t: 'changeSort';
-  resultSetName: string;
-  sortState?: SortState;
+export interface SortState {
+  readonly columnIndex: number;
+  readonly direction: SortDirection;
 }
+
+export function sameSortState(lhs: SortState | null, rhs: SortState | null): boolean {
+  if (lhs === rhs) return true;
+  if (!lhs || !rhs) return false
+  return lhs.columnIndex === rhs.columnIndex && lhs.direction === rhs.direction
+}
+
+
+export function sameResultPageSpecifier(lhs: ResultPageSpecifier, rhs: ResultPageSpecifier): boolean {
+  return lhs.page === rhs.page && lhs.resultSetName === rhs.resultSetName && lhs.runId === rhs.runId && sameSortState(lhs.sortState, rhs.sortState);
+}
+
