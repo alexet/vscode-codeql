@@ -21,8 +21,7 @@ To see what has changed in the last few versions of the extension, see the [Chan
 
 This project will track new feature development in CodeQL and, whenever appropriate, bring that functionality to the Visual Studio Code experience.
 
-## Contributing
-
+## Contributi
 This project welcomes contributions. See [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to build, install, and contribute.
 
 ## License
