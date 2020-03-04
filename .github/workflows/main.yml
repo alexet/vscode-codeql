@@ -17,4 +17,4 @@ jobs:
       - name: Echo
         if: matrix.os == 'ubuntu-latest'
         run: |
-          echo 1
+          echo 2
