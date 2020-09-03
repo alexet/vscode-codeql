@@ -693,6 +693,10 @@ export interface QueryToRun {
    */
   qlo: string;
   /**
+   * A uri pointing to the upgrade to base the query on.
+   */
+  compiledUpgrade?: string;
+  /**
    * The path where we should save this queries results
    */
   resultsPath: string;

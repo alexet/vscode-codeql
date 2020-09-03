@@ -106,6 +106,69 @@ async function checkAndConfirmDatabaseUpgrade(
 }
 
 /**
+ * Checks whether the given database can be upgraded to the given target DB scheme,
+ * and whether the user wants to proceed with the upgrade.
+ * Reports errors to both the user and the console.
+ * @returns the `UpgradeParams` needed to start the upgrade, if the upgrade is possible and was confirmed by the user, or `undefined` otherwise.
+ */
+async function checkAndConfirmDatabaseUpgrade2(
+  qs: qsClient.QueryServerClient, db: DatabaseItem, targetDbScheme: vscode.Uri, upgradesDirectories: vscode.Uri[]
+): Promise<messages.UpgradeParams | undefined> {
+  if (db.contents === undefined || db.contents.dbSchemeUri === undefined) {
+    helpers.showAndLogErrorMessage('Database is invalid, and cannot be upgraded.');
+    return;
+  }
+  const params: messages.UpgradeParams = {
+    fromDbscheme: db.contents.dbSchemeUri.fsPath,
+    toDbscheme: targetDbScheme.fsPath,
+    additionalUpgrades: upgradesDirectories.map(uri => uri.fsPath)
+  };
+
+  let checkUpgradeResult: messages.CheckUpgradeResult;
+  try {
+    qs.logger.log('Checking database upgrade...');
+    checkUpgradeResult = await checkDatabaseUpgrade(qs, params);
+  }
+  catch (e) {
+    helpers.showAndLogErrorMessage(`Database cannot be upgraded: ${e}`);
+    return;
+  }
+  finally {
+    qs.logger.log('Done checking database upgrade.');
+  }
+
+  const checkedUpgrades = checkUpgradeResult.checkedUpgrades;
+  if (checkedUpgrades === undefined) {
+    const error = checkUpgradeResult.upgradeError || '[no error message available]';
+    await helpers.showAndLogErrorMessage(`Database cannot be upgraded: ${error}`);
+    return;
+  }
+
+  if (checkedUpgrades.scripts.length === 0) {
+    await helpers.showAndLogInformationMessage('Database is already up to date; nothing to do.');
+    return;
+  }
+
+  let curSha = checkedUpgrades.initialSha;
+  for (const script of checkedUpgrades.scripts) {
+    curSha = script.newSha;
+  }
+
+  const targetSha = checkedUpgrades.targetSha;
+  if (curSha != targetSha) {
+    // Newlines aren't rendered in notifications: https://github.com/microsoft/vscode/issues/48900
+    // A modal dialog would be rendered better, but is more intrusive.
+    await helpers.showAndLogErrorMessage(`Database cannot be upgraded to the target database scheme.
+    Can upgrade from ${checkedUpgrades.initialSha} (current) to ${curSha}, but cannot reach ${targetSha} (target).`);
+    // TODO: give a more informative message if we think the DB is ahead of the target DB scheme
+    return;
+  }
+  return params;
+}
+
+
+
+/**
  * Command handler for 'Upgrade Database'.
  * Attempts to upgrade the given database to the given target DB scheme, using the given directory of upgrades.
  * First performs a dry-run and prompts the user to confirm the upgrade.
@@ -155,6 +218,57 @@ export async function upgradeDatabase(
     qs.logger.log('Done running database upgrade.');
   }
 }
+
+
+
+
+/**
+ * Command handler for 'Upgrade Database'.
+ * Attempts to upgrade the given database to the given target DB scheme, using the given directory of upgrades.
+ * First performs a dry-run and prompts the user to confirm the upgrade.
+ * Reports errors during compilation and evaluation of upgrades to the user.
+ */
+export async function upgradeDatabase2(
+  qs: qsClient.QueryServerClient, db: DatabaseItem, targetDbScheme: vscode.Uri, upgradesDirectories: vscode.Uri[]
+): Promise<string | undefined> {
+  const upgradeParams = await checkAndConfirmDatabaseUpgrade2(qs, db, targetDbScheme, upgradesDirectories);
+
+  if (upgradeParams === undefined) {
+    return;
+  }
+
+  let compileUpgradeResult: messages.CompileUpgradeResult;
+  try {
+    compileUpgradeResult = await compileDatabaseUpgrade(qs, upgradeParams);
+  }
+  catch (e) {
+    helpers.showAndLogErrorMessage(`Compilation of database upgrades failed: ${e}`);
+    return;
+  }
+  finally {
+    qs.logger.log('Done compiling database upgrade.');
+  }
+
+  if (compileUpgradeResult.compiledUpgrades === undefined) {
+    const error = compileUpgradeResult.error || '[no error message available]';
+    helpers.showAndLogErrorMessage(`Compilation of database upgrades failed: ${error}`);
+    return;
+  }
+
+  qs.logger.log('Running the following database upgrade:');
+  if (compileUpgradeResult.compiledUpgrades.compiledUpgradeFile === undefined) {
+    qs.logger.log(compileUpgradeResult.compiledUpgrades.scripts.map(s => s.description.description).join('\n'));
+  } else {
+    qs.logger.log(compileUpgradeResult.compiledUpgrades.descriptions.map(s => s.description).join('\n'));
+  }
+  if (compileUpgradeResult.compiledUpgrades.compiledUpgradeFile === undefined) {
+    helpers.showAndLogErrorMessage('Codeql too old');
+    return;
+  } else {
+    return compileUpgradeResult.compiledUpgrades.compiledUpgradeFile;
+  }
+}
+
 
 async function checkDatabaseUpgrade(
   qs: qsClient.QueryServerClient, upgradeParams: messages.UpgradeParams

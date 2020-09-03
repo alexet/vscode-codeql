@@ -15,7 +15,7 @@ import * as messages from './messages';
 import { QueryHistoryItemOptions } from './query-history';
 import * as qsClient from './queryserver-client';
 import { isQuickQueryPath } from './quick-query';
-import { upgradeDatabase } from './upgrades';
+import { upgradeDatabase2 } from './upgrades';
 
 /**
  * run-queries.ts
@@ -72,19 +72,33 @@ export class QueryInfo {
 
   async run(
     qs: qsClient.QueryServerClient,
+    upgrade: string | undefined
   ): Promise<messages.EvaluationResult> {
     let result: messages.EvaluationResult | null = null;
 
-    const callbackId = qs.registerCallback(res => { result = res; });
 
-    const queryToRun: messages.QueryToRun = {
-      resultsPath: this.resultsPaths.resultsPath,
-      qlo: vscode.Uri.file(this.compiledQueryPath).toString(),
-      allowUnknownTemplates: true,
-      templateValues: this.templates,
-      id: callbackId,
-      timeoutSecs: qs.config.timeoutSecs,
-    };
+    const callbackId = qs.registerCallback(res => { result = res; });
+    let queryToRun: messages.QueryToRun;
+    if (upgrade !== undefined) {
+      queryToRun = {
+        resultsPath: this.resultsPaths.resultsPath,
+        qlo: vscode.Uri.file(this.compiledQueryPath).toString(),
+        allowUnknownTemplates: true,
+        compiledUpgrade: vscode.Uri.file(upgrade).toString(),
+        templateValues: this.templates,
+        id: callbackId,
+        timeoutSecs: qs.config.timeoutSecs,
+      };
+    } else {
+      queryToRun = {
+        resultsPath: this.resultsPaths.resultsPath,
+        qlo: vscode.Uri.file(this.compiledQueryPath).toString(),
+        allowUnknownTemplates: true,
+        templateValues: this.templates,
+        id: callbackId,
+        timeoutSecs: qs.config.timeoutSecs,
+      };
+    }
     const dataset: messages.Dataset = {
       dbDir: this.dataset.fsPath,
       workingSet: 'default'
@@ -261,11 +275,11 @@ async function getSelectedPosition(editor: vscode.TextEditor): Promise<messages.
  * If they are incompatible but the database can be upgraded, suggest that upgrade.
  * If they are incompatible and the database cannot be upgraded, throw an error.
  */
-async function checkDbschemeCompatibility(
+async function checkDbschemeCompatibility2(
   cliServer: cli.CodeQLCliServer,
   qs: qsClient.QueryServerClient,
   query: QueryInfo
-): Promise<void> {
+): Promise<string | undefined> {
   const searchPath = helpers.getOnDiskWorkspaceFolders();
 
   if (query.dbItem.contents !== undefined && query.dbItem.contents.dbSchemeUri !== undefined) {
@@ -278,7 +292,7 @@ async function checkDbschemeCompatibility(
 
     // query.program.dbschemePath is the dbscheme of the actual
     // database we're querying.
-    const dbschemeOfDb = await hash(query.program.dbschemePath);
+    const dbschemeOfDb = await hash(query.dbItem.contents.dbSchemeUri.fsPath);
 
     // query.queryDbScheme is the dbscheme of the query we're
     // running, including the library we've resolved it to use.
@@ -288,22 +302,30 @@ async function checkDbschemeCompatibility(
     const upgradableTo = await hash(finalDbscheme);
 
     if (upgradableTo != dbschemeOfLib) {
-      logger.log(`Query ${query.program.queryPath} expects database scheme ${query.queryDbscheme}, but database has scheme ${query.program.dbschemePath}, and no upgrade path found`);
+      logger.log(`Query ${query.program.queryPath} expects database scheme ${query.queryDbscheme}, but database has scheme ${query.dbItem.contents.dbSchemeUri.fsPath}, and no upgrade path found`);
       throw new Error(`Query ${query.program.queryPath} expects database scheme ${query.queryDbscheme}, but the current database has a different scheme, and no database upgrades are available. The current database scheme may be newer than the CodeQL query libraries in your workspace. Please try using a newer version of the query libraries.`);
     }
 
     if (upgradableTo == dbschemeOfLib &&
       dbschemeOfDb != dbschemeOfLib) {
       // Try to upgrade the database
-      await upgradeDatabase(
+      const compiled = await upgradeDatabase2(
         qs,
         query.dbItem,
-        vscode.Uri.file(finalDbscheme),
+        vscode.Uri.file(query.queryDbscheme),
         getUpgradesDirectories(scripts)
       );
+      if (compiled === undefined) {
+        throw new Error('Couldn\'t compile upgrade');
+      } else {
+        return compiled;
+      }
     }
   }
+  return;
 }
+
+
 
 /**
  * Prompts the user to save `document` if it has unsaved changes.
@@ -458,7 +480,7 @@ export async function compileAndRunQueryAgainstDatabase(
     // Since we are compiling and running a query against a database,
     // we use the database's DB scheme here instead of the DB scheme
     // from the current document's project.
-    dbschemePath: db.contents.dbSchemeUri.fsPath,
+    dbschemePath: packConfig.dbscheme,
     queryPath: queryPath
   };
 
@@ -472,7 +494,7 @@ export async function compileAndRunQueryAgainstDatabase(
   }
 
   const query = new QueryInfo(qlProgram, db, packConfig.dbscheme, quickEvalPosition, metadata, templates);
-  await checkDbschemeCompatibility(cliServer, qs, query);
+  const upgrade = await checkDbschemeCompatibility2(cliServer, qs, query);
 
   let errors;
   try {
@@ -486,7 +508,7 @@ export async function compileAndRunQueryAgainstDatabase(
   }
 
   if (errors.length == 0) {
-    const result = await query.run(qs);
+    const result = await query.run(qs, upgrade);
     if (result.resultType !== messages.QueryResultType.SUCCESS) {
       const message = result.message || 'Failed to run query';
       logger.log(message);
